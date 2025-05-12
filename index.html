@@ -3,78 +3,170 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Linterna Parpadeante</title>
+  <title>Flash Parpadeante</title>
   <style>
-    body { font-family: sans-serif; padding: 1rem; }
-    label, input, button { display: block; margin: .5rem 0; }
+    :root {
+      --bg: #121212;
+      --fg: #e0e0e0;
+      --accent: #1e88e5;
+      --accent-dark: #1565c0;
+      --danger: #e53935;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+    h1 {
+      margin-bottom: 1rem;
+      font-size: 2rem;
+      color: var(--accent);
+    }
+    .control {
+      width: 100%;
+      max-width: 400px;
+      background: #1f1f1f;
+      padding: 1.5rem;
+      border-radius: var(--radius);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+    .control label {
+      display: block;
+      margin-bottom: .5rem;
+      font-weight: bold;
+    }
+    .control input[type="range"] {
+      width: 100%;
+      margin: .5rem 0 1rem;
+    }
+    .buttons {
+      display: flex;
+      gap: 1rem;
+    }
+    button {
+      flex: 1;
+      padding: .75rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background .2s;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #startBtn {
+      background: var(--accent);
+      color: #fff;
+    }
+    #startBtn:hover:not(:disabled) {
+      background: var(--accent-dark);
+    }
+    #stopBtn {
+      background: var(--danger);
+      color: #fff;
+    }
+    #stopBtn:hover:not(:disabled) {
+      filter: brightness(1.1);
+    }
+    .status {
+      margin-top: 1rem;
+      text-align: center;
+      font-style: italic;
+    }
   </style>
 </head>
 <body>
-  <h1>Linterna Parpadeante</h1>
-  <label for="freq">Frecuencia (Hz):</label>
-  <input type="number" id="freq" value="2" min="0.1" step="0.1">
-  <button id="startBtn">Iniciar parpadeo</button>
-  <button id="stopBtn" disabled>Detener</button>
+  <h1>Flash Parpadeante</h1>
+  <div class="control">
+    <label for="freq">Frecuencia: <span id="freqVal">2.0</span> Hz</label>
+    <input type="range" id="freq" min="0.1" max="10" step="0.1" value="2">
+    <div class="buttons">
+      <button id="startBtn">Iniciar</button>
+      <button id="stopBtn" disabled>Detener</button>
+    </div>
+    <div class="status" id="status">Estado: detenido</div>
+  </div>
 
   <script>
-    let stream, track, blinkInterval;
+    let stream = null;
+    let track = null;
+    let blinkInterval = null;
 
-    document.getElementById('startBtn').addEventListener('click', async () => {
-      const freq = parseFloat(document.getElementById('freq').value);
-      if (!(freq > 0)) {
-        alert('Introduce una frecuencia válida (> 0).');
-        return;
-      }
+    const freqInput = document.getElementById('freq');
+    const freqVal = document.getElementById('freqVal');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+
+    // Actualiza valor mostrado del slider
+    freqInput.addEventListener('input', () => {
+      freqVal.textContent = parseFloat(freqInput.value).toFixed(1);
+    });
+
+    startBtn.addEventListener('click', async () => {
+      const freq = parseFloat(freqInput.value);
+      if (freq <= 0) return alert('Frecuencia debe ser mayor que 0.');
 
       try {
-        // Pedimos la cámara trasera con torch
+        // Pide permiso a la cámara trasera
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { exact: 'environment' } }
         });
         track = stream.getVideoTracks()[0];
 
-        const capabilities = track.getCapabilities();
-        if (!capabilities.torch) {
-          alert('Este dispositivo o navegador no soporta la linterna mediante torch API.');
-          stopAll();
-          return;
+        const cap = track.getCapabilities();
+        if (!cap.torch) {
+          throw new Error('Este dispositivo no soporta modo flash/torch.');
         }
 
-        // Alternar linterna
-        let isOn = false;
-        const period = 1000 / freq; // ms por ciclo completo
-        blinkInterval = setInterval(async () => {
-          isOn = !isOn;
-          await track.applyConstraints({
-            advanced: [{ torch: isOn }]
-          });
-        }, period / 2);
+        // Calcula periodo de parpadeo
+        const halfPeriod = (1000 / freq) / 2;
 
-        document.getElementById('startBtn').disabled = true;
-        document.getElementById('stopBtn').disabled = false;
-      } catch (err) {
+        // Inicia parpadeo
+        let on = false;
+        blinkInterval = setInterval(() => {
+          on = !on;
+          track.applyConstraints({ advanced: [{ torch: on }] })
+            .catch(console.warn);
+          statusEl.textContent = `Estado: ${on ? 'Flash encendido' : 'Flash apagado'}`;
+        }, halfPeriod);
+
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        statusEl.textContent = 'Estado: iniciando...';
+      }
+      catch (err) {
         console.error(err);
-        alert('Error al acceder a la cámara: ' + err.message);
-        stopAll();
+        alert('Error: ' + err.message);
+        cleanup();
       }
     });
 
-    document.getElementById('stopBtn').addEventListener('click', () => {
-      stopAll();
+    stopBtn.addEventListener('click', () => {
+      cleanup();
     });
 
-    function stopAll() {
+    function cleanup() {
       clearInterval(blinkInterval);
       if (track) {
         track.applyConstraints({ advanced: [{ torch: false }] })
-             .catch(() => { /* ignorar */ });
+             .catch(() => {});
         track.stop();
       }
       if (stream) {
         stream.getTracks().forEach(t => t.stop());
       }
-      document.getElementById('startBtn').disabled = false;
-      document.getElementById('stopBtn').disabled = true;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusEl.textContent = 'Estado: detenido';
     }
   </script>
 </body>
